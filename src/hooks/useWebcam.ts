@@ -26,69 +26,72 @@ export const useWebcam = () => {
       streamRef.current = null;
     }
 
-    // Default constraints
-    let constraints: MediaStreamConstraints = {
-      audio: false,
-      video: {
-        facingMode: 'user',
-        width: resolution === '1080p' ? { ideal: 1920 } : { ideal: 1280 },
-        height: resolution === '1080p' ? { ideal: 1080 } : { ideal: 720 },
-      },
+    const resolutionConstraints = {
+      width: resolution === '1080p' ? { ideal: 1920 } : { ideal: 1280 },
+      height: resolution === '1080p' ? { ideal: 1080 } : { ideal: 720 },
     };
 
+    // Stage 1: Request camera permission with minimal constraints.
+    // On deployed HTTPS origins (e.g. Vercel), enumerateDevices() returns
+    // empty deviceId/label until permission has been granted. We first get
+    // a basic stream to unlock the device list, then optionally upgrade.
+    let baseStream: MediaStream | null = null;
+    try {
+      baseStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    } catch (permErr: any) {
+      console.error('Fallback camera access also failed:', permErr);
+      let errorMsg = 'Could not access webcam.';
+      if (permErr.name === 'NotAllowedError') {
+        errorMsg = 'Webcam permission denied. Please allow camera access in your browser settings.';
+      } else if (permErr.name === 'NotFoundError') {
+        errorMsg = 'No webcam found on this device. Please connect a camera and refresh.';
+      }
+      setError(errorMsg);
+      return { stream: null, error: errorMsg };
+    }
+
+    // Stage 2: Now that permission is granted, enumerate real device IDs/labels
+    // and try to get the best physical camera at the desired resolution.
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter((d) => d.kind === 'videoinput');
-      
-      const hasLabels = videoDevices.some(d => d.label);
+      const hasLabels = videoDevices.some((d) => d.label);
+
       if (hasLabels) {
-        // Keywords corresponding to virtual/software cameras
+        // Prefer a physical (non-virtual) camera
         const virtualKeywords = ['obs', 'virtual', 'epoc', 'manycam', 'splitcam', 'iriun', 'camo', 'elgato', 'virtualcamera'];
         const physicalDevices = videoDevices.filter((d) => {
           const label = d.label.toLowerCase();
           return !virtualKeywords.some((kw) => label.includes(kw));
         });
 
-        if (physicalDevices.length > 0) {
-          constraints = {
-            audio: false,
-            video: {
-              deviceId: { ideal: physicalDevices[0].deviceId },
-              width: resolution === '1080p' ? { ideal: 1920 } : { ideal: 1280 },
-              height: resolution === '1080p' ? { ideal: 1080 } : { ideal: 720 }
-            }
-          };
+        const targetDevice = physicalDevices[0] ?? videoDevices[0];
+        if (targetDevice?.deviceId) {
+          // Stop the basic stream before requesting a better one
+          baseStream.getTracks().forEach((t) => t.stop());
+          baseStream = null;
+
+          try {
+            const upgradedStream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { deviceId: { exact: targetDevice.deviceId }, ...resolutionConstraints },
+            });
+            attachStream(upgradedStream);
+            return { stream: upgradedStream, error: null };
+          } catch (upgradeErr) {
+            console.warn('Upgraded camera constraints failed, falling back to base stream…', upgradeErr);
+            // Re-acquire the basic stream since we stopped it
+            baseStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          }
         }
       }
     } catch (e) {
-      console.warn('Failed to enumerate devices or filter virtual cameras:', e);
+      console.warn('Device enumeration or upgrade failed:', e);
     }
 
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      attachStream(mediaStream);
-      return { stream: mediaStream, error: null };
-    } catch (firstErr: any) {
-      console.warn('Preferred camera constraints failed, trying fallback…', firstErr.name);
-
-      // --- Attempt 2: minimal constraints (any camera, any resolution) ---
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        attachStream(mediaStream);
-        return { stream: mediaStream, error: null };
-      } catch (secondErr: any) {
-        console.error('Fallback camera access also failed:', secondErr);
-
-        let errorMsg = 'Could not access webcam.';
-        if (secondErr.name === 'NotAllowedError' || firstErr.name === 'NotAllowedError') {
-          errorMsg = 'Webcam permission denied. Please allow camera access in your browser settings.';
-        } else if (secondErr.name === 'NotFoundError') {
-          errorMsg = 'No webcam found on this device. Please connect a camera and refresh.';
-        }
-        setError(errorMsg);
-        return { stream: null, error: errorMsg };
-      }
-    }
+    // Fall through: use the already-acquired base stream
+    attachStream(baseStream!);
+    return { stream: baseStream, error: null };
   }, []);
 
   const stopCamera = useCallback(() => {

@@ -26,6 +26,7 @@ interface GameState {
   fps: number;
   cameraActive: boolean;
   cameraError: string | null;
+  trackerReady: boolean;
 
   // Active Objects
   activeObjects: TargetObject[];
@@ -52,6 +53,7 @@ interface GameState {
   setTrackingConfidence: (conf: number) => void;
   setFPS: (fps: number) => void;
   setCameraStatus: (active: boolean, error: string | null) => void;
+  setTrackerReady: (ready: boolean) => void;
   
   // Settings Actions
   updateSettings: (settings: Partial<GameSettings>) => void;
@@ -59,7 +61,7 @@ interface GameState {
   // Game Loop Actions
   spawnObject: () => void;
   tickGame: (dt: number) => void;
-  processGestureInput: (gesture: GestureType) => void;
+  processGestureInput: (gesture: GestureType, allowGlobalMatch?: boolean) => void;
   unlockAchievement: (id: string) => void;
   
   // Feedback Actions
@@ -142,6 +144,7 @@ export const useGameStore = create<GameState>((set, get) => {
     fps: 0,
     cameraActive: false,
     cameraError: null,
+    trackerReady: false,
     activeObjects: [],
     settings: initialSettings,
     achievements: initialAchievements,
@@ -172,17 +175,6 @@ export const useGameStore = create<GameState>((set, get) => {
         timeElapsed: 0,
         activeObjects: []
       });
-
-      const countInterval = setInterval(() => {
-        const currentCount = get().countdown;
-        if (currentCount > 1) {
-          set({ countdown: currentCount - 1 });
-          audioManager.playClick();
-        } else {
-          clearInterval(countInterval);
-          get().startGame();
-        }
-      }, 1000);
     },
 
     startGame: () => {
@@ -229,16 +221,25 @@ export const useGameStore = create<GameState>((set, get) => {
       const prevGesture = get().detectedGesture;
       set({ detectedGesture: gesture });
       
-      // If gesture changed, check input
+      // If gesture changed, check input (allows global matching)
       if (gesture !== 'none' && gesture !== prevGesture && get().gameState === 'playing') {
-        get().processGestureInput(gesture);
+        get().processGestureInput(gesture, true);
       }
     },
 
-    setHandPosition: (pos) => set({ handPosition: pos }),
+    setHandPosition: (pos) => {
+      set({ handPosition: pos });
+      
+      // If hand is positioned, and we are holding a gesture, also check hover (hover-only matching)
+      const { detectedGesture, gameState } = get();
+      if (pos && gameState === 'playing' && detectedGesture !== 'none') {
+        get().processGestureInput(detectedGesture, false);
+      }
+    },
     setTrackingConfidence: (conf) => set({ trackingConfidence: conf }),
     setFPS: (fps) => set({ fps }),
     setCameraStatus: (active, error) => set({ cameraActive: active, cameraError: error }),
+    setTrackerReady: (ready) => set({ trackerReady: ready }),
 
     updateSettings: (newSettings) => {
       const updated = { ...get().settings, ...newSettings };
@@ -417,7 +418,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
-    processGestureInput: (gesture) => {
+    processGestureInput: (gesture, allowGlobalMatch = true) => {
       const { gameState, activeObjects, difficulty, combo, score, handPosition } = get();
       if (gameState !== 'playing' || gesture === 'none') return;
 
@@ -426,7 +427,7 @@ export const useGameStore = create<GameState>((set, get) => {
       // Find if this gesture matches any active object on screen.
       // To make it skill-based, we prioritize:
       // 1. If handPosition is available, we check if hand cursor is overlapping/hovering an object requiring this gesture.
-      // 2. If no hover, we match the OLDEST active object that matches this gesture (global hit).
+      // 2. If no hover, and allowGlobalMatch is true, we match the OLDEST active object that matches this gesture (global hit).
       // Let's implement both but give priority to objects closer to the hand cursor if hand is active.
 
       let targetObj: TargetObject | null = null;
@@ -440,7 +441,7 @@ export const useGameStore = create<GameState>((set, get) => {
           
           // distance in normalized canvas percentage
           const dist = Math.hypot(obj.x - handPosition.x, obj.y - handPosition.y);
-          // hover range: object radius + padding (e.g. 12% of screen width)
+          // hover range: object radius + padding (e.g. 10% of screen width)
           if (dist < obj.radius + 10 && obj.requiredGesture === gesture) {
             targetObj = obj;
             matchedIndex = i;
@@ -450,7 +451,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
 
       // If no hovered match found, look for the oldest matching object globally
-      if (matchedIndex === -1) {
+      if (matchedIndex === -1 && allowGlobalMatch) {
         for (let i = 0; i < activeObjects.length; i++) {
           const obj = activeObjects[i];
           if (!obj.isHit && !obj.isMissed && obj.requiredGesture === gesture) {
@@ -499,17 +500,6 @@ export const useGameStore = create<GameState>((set, get) => {
         if (nextScore >= 500) get().unlockAchievement('score_500');
         if (nextScore >= 1000) get().unlockAchievement('score_1000');
         if (nextCombo >= 50) get().unlockAchievement('perfect_50');
-
-      } else {
-        // WRONG GESTURE INPUT (the user performed a gesture that does not match any active targets)
-        // We only penalize if there are targets on screen to avoid frustrating the user when they just stretch their hand.
-        if (activeObjects.some(obj => !obj.isHit && !obj.isMissed)) {
-          audioManager.playFailure();
-          set((state) => ({
-            score: Math.max(0, state.score - 5),
-            combo: 0 // reset combo
-          }));
-        }
       }
     },
 

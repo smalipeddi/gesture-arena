@@ -27,12 +27,12 @@ export const WebcamFeed: React.FC = () => {
     let active = true;
     
     const init = async () => {
-      const mediaStream = await startCamera(resolution);
+      const result = await startCamera(resolution);
       if (active) {
-        if (mediaStream) {
+        if (result && result.stream) {
           setCameraStatus(true, null);
         } else {
-          setCameraStatus(false, webcamError || 'Failed to access camera.');
+          setCameraStatus(false, result?.error || 'Failed to access camera.');
         }
       }
     };
@@ -44,7 +44,7 @@ export const WebcamFeed: React.FC = () => {
       stopCamera();
       setCameraStatus(false, null);
     };
-  }, [resolution, startCamera, stopCamera, setCameraStatus, webcamError]);
+  }, [resolution, startCamera, stopCamera, setCameraStatus]);
 
   // Display labels for detected gestures
   const getGestureLabel = (gesture: string) => {

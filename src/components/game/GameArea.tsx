@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import type { TargetObject } from '../../types';
-import { Volume2, VolumeX, Pause, Play, RotateCcw } from 'lucide-react';
+import { Volume2, VolumeX, Pause, Play, RotateCcw, RefreshCw } from 'lucide-react';
+import audioManager from '../../audio/audioManager';
 
 interface Particle {
   x: number;
@@ -39,6 +40,8 @@ export const GameArea: React.FC = () => {
   const difficulty = useGameStore((state) => state.difficulty);
   const score = useGameStore((state) => state.score);
   const combo = useGameStore((state) => state.combo);
+  const cameraActive = useGameStore((state) => state.cameraActive);
+  const trackerReady = useGameStore((state) => state.trackerReady);
   
   const pauseGame = useGameStore((state) => state.pauseGame);
   const resumeGame = useGameStore((state) => state.resumeGame);
@@ -70,6 +73,25 @@ export const GameArea: React.FC = () => {
 
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Countdown controller that waits for camera and gesture engine
+  useEffect(() => {
+    if (gameState !== 'countdown') return;
+    if (!cameraActive || !trackerReady) return;
+
+    const timer = setInterval(() => {
+      const current = useGameStore.getState().countdown;
+      if (current > 1) {
+        useGameStore.setState({ countdown: current - 1 });
+        audioManager.playClick();
+      } else {
+        clearInterval(timer);
+        useGameStore.getState().startGame();
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameState, cameraActive, trackerReady]);
 
   // Screen shake logic
   const triggerScreenShake = (intensity = 6) => {
@@ -471,12 +493,27 @@ export const GameArea: React.FC = () => {
 
       {/* Floating Status / Action Indicator Overlays (In-Game states) */}
       {gameState === 'countdown' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px] z-10">
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2">Prepare Arena</span>
-            <span className="text-8xl font-black text-white animate-ping">
-              {useGameStore.getState().countdown}
-            </span>
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-[4px] z-10">
+          <div className="flex flex-col items-center text-center p-6 max-w-sm">
+            {(!cameraActive || !trackerReady) ? (
+              <>
+                <RefreshCw className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+                <span className="text-xs uppercase tracking-[0.25em] text-blue-400 font-bold mb-2">Calibrating Sensors</span>
+                <span className="text-sm font-semibold text-zinc-300">
+                  Waiting for camera & gesture engine...
+                </span>
+                <span className="text-[10px] text-zinc-500 mt-2">
+                  Please grant camera access and show your hand in the frame once loaded.
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-xs uppercase tracking-[0.25em] text-zinc-500 font-bold mb-3">Prepare Arena</span>
+                <span className="text-8xl font-black text-white animate-ping" key={useGameStore.getState().countdown}>
+                  {useGameStore.getState().countdown}
+                </span>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -43,9 +43,18 @@ export const useHandTracker = (
   const setTrackingConfidence = useGameStore((state) => state.setTrackingConfidence);
   const setFPS = useGameStore((state) => state.setFPS);
   const setCameraStatus = useGameStore((state) => state.setCameraStatus);
+  const storeSetTrackerReady = useGameStore((state) => state.setTrackerReady);
   const showSkeleton = useGameStore((state) => state.settings.showSkeleton);
   const showLandmarks = useGameStore((state) => state.settings.showLandmarks);
   const confidenceThreshold = useGameStore((state) => state.settings.trackingConfidence);
+
+  // Sync trackerReady status to global store
+  useEffect(() => {
+    storeSetTrackerReady(trackerReady);
+    return () => {
+      storeSetTrackerReady(false);
+    };
+  }, [trackerReady, storeSetTrackerReady]);
 
   // Initialize MediaPipe landmarker
   const initTracker = useCallback(async () => {

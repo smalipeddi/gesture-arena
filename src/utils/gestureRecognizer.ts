@@ -21,7 +21,7 @@ const isFingerExtended = (
   const distTipMCP = dist3D(landmarks[tipIdx], landmarks[mcpIdx]);
   const distPipMCP = dist3D(landmarks[pipIdx], landmarks[mcpIdx]);
   // If the tip is significantly further from the MCP than the PIP is, the finger is extended
-  return distTipMCP > distPipMCP * 1.25;
+  return distTipMCP > distPipMCP * 1.20;
 };
 
 // Check if the thumb is extended
@@ -92,7 +92,7 @@ class GestureEngine {
       detectedGesture = 'fist';
     } else if (isPinching) {
       detectedGesture = 'pinch';
-    } else if (indexExtended && middleExtended && ringExtended && pinkyExtended && thumbExtended) {
+    } else if (indexExtended && middleExtended && ringExtended && pinkyExtended) {
       detectedGesture = 'palm';
     } else if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
       // Peace Sign: Index and Middle extended, Ring and Pinky folded

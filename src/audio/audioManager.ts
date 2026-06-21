@@ -80,6 +80,166 @@ class AudioManager {
     osc.stop(this.ctx.currentTime + 0.06);
   }
 
+  // Generates 1 second of white noise for sound synthesis
+  private getNoiseBuffer(): AudioBuffer {
+    if (!this.ctx) throw new Error('AudioContext not initialized');
+    const bufferSize = this.ctx.sampleRate * 1.0; 
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    return buffer;
+  }
+
+  // Play a noise-synthesized swoosh for hand slashing
+  public playSlash() {
+    this.resume();
+    if (!this.ctx || !this.mainVolumeNode || this.isMuted) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.getNoiseBuffer();
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(800, now);
+      filter.frequency.exponentialRampToValueAtTime(1800, now + 0.1);
+      filter.frequency.exponentialRampToValueAtTime(300, now + 0.25);
+      filter.Q.setValueAtTime(4.0, now);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.35, now + 0.03); 
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.22);
+      
+      oscGain.gain.setValueAtTime(0, now);
+      oscGain.gain.linearRampToValueAtTime(0.08, now + 0.03);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.mainVolumeNode);
+
+      osc.connect(oscGain);
+      oscGain.connect(this.mainVolumeNode);
+
+      noise.start(now);
+      noise.stop(now + 0.28);
+      
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch (e) {
+      console.error('Failed to play synthesized slash sound:', e);
+    }
+  }
+
+  // Play a squishy wet impact for fruit slicing
+  public playSplat() {
+    this.resume();
+    if (!this.ctx || !this.mainVolumeNode || this.isMuted) return;
+
+    try {
+      const now = this.ctx.currentTime;
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.getNoiseBuffer();
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1000, now);
+      filter.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.4, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.linearRampToValueAtTime(300, now + 0.1);
+
+      oscGain.gain.setValueAtTime(0.12, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.mainVolumeNode);
+
+      osc.connect(oscGain);
+      oscGain.connect(this.mainVolumeNode);
+
+      noise.start(now);
+      noise.stop(now + 0.18);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch (e) {
+      console.error('Failed to play synthesized splat sound:', e);
+    }
+  }
+
+  // Play a booming rumble for bomb detonation
+  public playExplosion() {
+    this.resume();
+    if (!this.ctx || !this.mainVolumeNode || this.isMuted) return;
+
+    try {
+      const now = this.ctx.currentTime;
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.getNoiseBuffer();
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(250, now);
+      filter.frequency.exponentialRampToValueAtTime(40, now + 0.8);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.6, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(90, now);
+      osc.frequency.exponentialRampToValueAtTime(20, now + 0.6);
+
+      const oscFilter = this.ctx.createBiquadFilter();
+      oscFilter.type = 'lowpass';
+      oscFilter.frequency.setValueAtTime(150, now);
+
+      oscGain.gain.setValueAtTime(0.5, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.mainVolumeNode);
+
+      osc.connect(oscFilter);
+      oscFilter.connect(oscGain);
+      oscGain.connect(this.mainVolumeNode);
+
+      noise.start(now);
+      noise.stop(now + 1.0);
+
+      osc.start(now);
+      osc.stop(now + 0.85);
+    } catch (e) {
+      console.error('Failed to play synthesized explosion sound:', e);
+    }
+  }
+
   // Play an ascending major arpeggio for a correct gesture hit
   public playSuccess() {
     this.resume();

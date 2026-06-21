@@ -6,62 +6,34 @@ import { motion } from 'framer-motion';
 export const HowToPlayPage: React.FC = () => {
   const setActivePage = useGameStore((state) => state.setActivePage);
 
-  const gestureCards = [
+  const rulesCards = [
     {
-      gesture: 'Open Palm',
-      icon: '👋',
-      target: 'Blue Orb',
-      color: 'border-blue-500/20 bg-blue-500/5 text-blue-400',
-      glow: 'shadow-blue-500/10',
-      desc: 'Extend all 5 fingers fully. Useful for catching large blue energy orbs.'
-    },
-    {
-      gesture: 'Fist',
-      icon: '✊',
-      target: 'Red Cube',
-      color: 'border-red-500/20 bg-red-500/5 text-red-400',
-      glow: 'shadow-red-500/10',
-      desc: 'Close all fingers tightly. Use this to smash heavy red cubes entering the arena.'
-    },
-    {
-      gesture: 'Pinch',
-      icon: '🤏',
-      target: 'Yellow Diamond',
-      color: 'border-amber-500/20 bg-amber-500/5 text-amber-400',
-      glow: 'shadow-amber-500/10',
-      desc: 'Touch the tip of your index finger and thumb together. Pops small yellow diamonds.'
-    },
-    {
-      gesture: 'Peace Sign',
-      icon: '✌️',
-      target: 'Green Triangle',
+      title: 'Slice Fruits',
+      icon: '🍉',
       color: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400',
       glow: 'shadow-emerald-500/10',
-      desc: 'Extend only the index and middle fingers. Activates green defensive triangles.'
+      desc: 'Move your hand cursor quickly over Apples, Bananas, Watermelons, Coconuts, and Oranges to slice them. Slicing fruits splits them and scores points!'
     },
     {
-      gesture: 'Pointing',
-      icon: '👆',
-      target: 'Purple Star',
+      title: 'Avoid Bombs',
+      icon: '💣',
+      color: 'border-red-500/20 bg-red-500/5 text-red-400',
+      glow: 'shadow-red-500/10',
+      desc: 'Watch out for spiked metal bombs with burning fuses. Slicing a bomb triggers an instant explosion, shakes the screen, and costs you a life!'
+    },
+    {
+      title: 'Keep Them Up',
+      icon: '🔻',
+      color: 'border-amber-500/20 bg-amber-500/5 text-amber-400',
+      glow: 'shadow-amber-500/10',
+      desc: 'Do not let regular fruits fall back down past the bottom edge of the arena. Each fruit that drops uncut costs you one of your 3 lives!'
+    },
+    {
+      title: 'Build Combos',
+      icon: '⚡',
       color: 'border-purple-500/20 bg-purple-500/5 text-purple-400',
       glow: 'shadow-purple-500/10',
-      desc: 'Extend only your index finger. Snipe purple star energy cores drifting by.'
-    },
-    {
-      gesture: 'Swipe Left',
-      icon: '👈',
-      target: 'Orange Wave',
-      color: 'border-orange-500/20 bg-orange-500/5 text-orange-400',
-      glow: 'shadow-orange-500/10',
-      desc: 'Flick your entire hand rapidly to the left. Instantly absorbs orange compression waves.'
-    },
-    {
-      gesture: 'Swipe Right',
-      icon: '👉',
-      target: 'Cyan Arrow',
-      color: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-400',
-      glow: 'shadow-cyan-500/10',
-      desc: 'Flick your entire hand rapidly to the right. Deflects incoming cyan vector arrows.'
+      desc: 'Slice multiple fruits in quick succession to increase your Combo Multiplier. Higher combos multiply your score significantly!'
     }
   ];
 
@@ -87,7 +59,7 @@ export const HowToPlayPage: React.FC = () => {
               <BookOpen className="w-5 h-5 text-blue-500" />
               Arena Codex
             </h1>
-            <span className="text-xs text-zinc-500">Learn the gesture mappings before entering combat</span>
+            <span className="text-xs text-zinc-500">Learn the combat directives before entering the arena</span>
           </div>
         </div>
 
@@ -106,9 +78,9 @@ export const HowToPlayPage: React.FC = () => {
             <Zap className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-sm">How The Arena Works</h3>
+            <h3 className="font-bold text-sm">Webcam Hand Tracker</h3>
             <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-              Target shapes spawn from the screen edges and drift across the screen. You must hover your hand cursor over the object and execute its mapped hand gesture to score!
+              Show your hand to the camera to summon the glowing light-saber trail. Sweep your hand across the air to slash through fruits. High-velocity hand motions make for cleaner cuts!
             </p>
           </div>
         </div>
@@ -118,35 +90,32 @@ export const HowToPlayPage: React.FC = () => {
             <Star className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-sm">Score Multipliers & Combos</h3>
+            <h3 className="font-bold text-sm">Gradual Intensity Scale</h3>
             <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-              Executing correct gestures in succession builds your combo meter, multiplying your scores. Missing a target, letting a timer expire, or performing the wrong gesture resets your multiplier!
+              As you survive inside the arena, difficulty escalates from Easy to Insane. Fruits and bombs spawn faster, rise higher, and test your reaction limits to the maximum.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Gesture Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 w-full z-10">
-        {gestureCards.map((card, idx) => (
+      {/* Rules Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full z-10">
+        {rulesCards.map((card, idx) => (
           <motion.div
             key={idx}
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.05 }}
-            className={`p-5 rounded-2xl border backdrop-blur-md flex flex-col justify-between shadow-lg h-[180px] ${card.color} ${card.glow}`}
+            className={`p-5 rounded-2xl border backdrop-blur-md flex flex-col justify-between shadow-lg h-[190px] ${card.color} ${card.glow}`}
           >
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-white/55">Target</span>
-                <span className="text-sm font-black">{card.target}</span>
+                <span className="text-xs font-black uppercase tracking-wider text-white/55">Directives</span>
+                <span className="text-2xl">{card.icon}</span>
               </div>
-              <div className="flex items-center gap-3 mt-3">
-                <span className="text-3xl">{card.icon}</span>
-                <span className="text-base font-extrabold text-white">{card.gesture}</span>
-              </div>
+              <h3 className="text-base font-extrabold text-white mt-3">{card.title}</h3>
             </div>
-            <p className="text-[11px] text-zinc-400 leading-relaxed font-medium">
+            <p className="text-[11px] text-zinc-400 leading-relaxed font-medium mt-2">
               {card.desc}
             </p>
           </motion.div>

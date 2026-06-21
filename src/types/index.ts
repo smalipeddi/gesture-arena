@@ -9,19 +9,32 @@ export type GestureType =
   | 'hold'
   | 'none';
 
-export type TargetShape =
-  | 'orb'
-  | 'cube'
-  | 'diamond'
-  | 'triangle'
-  | 'star'
-  | 'wave'
-  | 'arrow';
+export type FruitType =
+  | 'apple'
+  | 'banana'
+  | 'watermelon'
+  | 'coconut'
+  | 'orange'
+  | 'bomb';
+
+export interface SlicedHalf {
+  id: string;
+  type: 'apple' | 'banana' | 'watermelon' | 'coconut' | 'orange';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rotation: number;
+  rotationSpeed: number;
+  color: string;
+  side: 'left' | 'right';
+  opacity: number;
+  createdAt: number;
+}
 
 export interface TargetObject {
   id: string;
-  type: TargetShape;
-  requiredGesture: GestureType;
+  type: FruitType;
   x: number; // 0 to 100 (relative canvas width)
   y: number; // 0 to 100 (relative canvas height)
   vx: number; // velocity x
@@ -29,13 +42,15 @@ export interface TargetObject {
   radius: number;
   color: string;
   glowColor: string;
-  label: string;
   createdAt: number;
   duration: number; // time limit in ms
   opacity: number;
-  isHit: boolean;
+  isHit: boolean; // represents sliced state
   isMissed: boolean;
   scale: number;
+  isBomb: boolean;
+  rotation: number;
+  rotationSpeed: number;
 }
 
 export type DifficultyLevel = 'easy' | 'medium' | 'hard' | 'expert' | 'insane';

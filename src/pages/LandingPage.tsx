@@ -24,16 +24,16 @@ export const LandingPage: React.FC = () => {
           {/* Cyberpunk game tag */}
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-bold text-blue-400 mb-6">
             <Cpu className="w-3.5 h-3.5" />
-            <span>AI GESTURAL DETECTION GAME</span>
+            <span>AI WEBCAM MOTION GAME</span>
           </div>
 
           <h1 className="text-5xl md:text-6xl font-black tracking-tight text-white uppercase leading-[0.95]">
-            Gesture <br />
+            Fruit Slash <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500">Arena</span>
           </h1>
 
           <p className="mt-4 text-zinc-400 text-sm md:text-base leading-relaxed max-w-md">
-            Enter a minimal kinetic combat arena. Dodge, slash, and trigger particles entirely using real-time webcam hand tracking. No controller required.
+            Enter a high-speed kinetic arena. Slice flying cyber-fruits and dodge bombs entirely using real-time webcam hand tracking. No controller required.
           </p>
 
           {/* Navigation Controls */}
@@ -91,7 +91,7 @@ export const LandingPage: React.FC = () => {
           <div className="flex gap-2.5 items-start p-4 rounded-2xl bg-white/5 border border-white/5 backdrop-blur-sm text-xs text-zinc-400 mt-1">
             <ShieldAlert className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong>Calibration Advice:</strong> Adjust your distance until your full hand is tracked. You can test your Open Palm, Fist, and Peace signs directly above before launching the game!
+              <strong>Calibration Advice:</strong> Adjust your distance and lighting until your hand tracking is stable. Move your hand to generate the glowing cyan sword trail and slice the virtual targets!
             </p>
           </div>
         </div>

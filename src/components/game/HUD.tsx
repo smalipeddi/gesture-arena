@@ -1,6 +1,6 @@
 import React from 'react';
 import { useGameStore } from '../../store/useGameStore';
-import { Award, Heart, Settings, RotateCcw, Home } from 'lucide-react';
+import { Award, Heart, Settings, RotateCcw, Home, Info } from 'lucide-react';
 
 export const HUD: React.FC = () => {
   const score = useGameStore((state) => state.score);
@@ -13,9 +13,6 @@ export const HUD: React.FC = () => {
   const resetGame = useGameStore((state) => state.resetGame);
   const setActivePage = useGameStore((state) => state.setActivePage);
 
-  // Find oldest active object to display as "Current Target"
-  const currentTarget = activeObjects.find((o) => !o.isHit && !o.isMissed);
-
   const getDifficultyColor = (diff: string) => {
     switch (diff) {
       case 'easy': return 'from-blue-500 to-indigo-600 shadow-blue-500/20';
@@ -24,19 +21,6 @@ export const HUD: React.FC = () => {
       case 'expert': return 'from-purple-500 to-violet-600 shadow-purple-500/20';
       case 'insane': return 'from-pink-500 to-red-600 shadow-pink-500/20 animate-pulse';
       default: return 'from-zinc-500 to-zinc-600';
-    }
-  };
-
-  const getGestureShortcut = (gesture: string) => {
-    switch (gesture) {
-      case 'palm': return '👋 Open Palm';
-      case 'fist': return '✊ Fist';
-      case 'pinch': return '🤏 Pinch';
-      case 'peace': return '✌️ Peace Sign';
-      case 'pointing': return '👆 Pointing';
-      case 'swipe_left': return '👈 Swipe Left';
-      case 'swipe_right': return '👉 Swipe Right';
-      default: return 'None';
     }
   };
 
@@ -86,77 +70,46 @@ export const HUD: React.FC = () => {
       {/* 2. Middle Panel: Target Highlight & Info Dashboard */}
       <div className="flex-1 min-h-[140px] px-6 py-5 rounded-2xl bg-white/5 border border-white/5 backdrop-blur-md flex flex-col justify-between">
         <div>
-          <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest block">Active Challenge Target</span>
-          {currentTarget ? (
-            <div className="flex items-center gap-6 mt-4 animate-fade-in">
-              {/* Glowing Target visual indicator */}
-              <div 
-                className="w-14 h-14 rounded-full flex items-center justify-center border-2 border-white/20 shadow-lg"
-                style={{ 
-                  backgroundColor: currentTarget.color,
-                  boxShadow: `0 0 25px ${currentTarget.glowColor}`
-                }}
-              >
-                <span className="text-2xl">
-                  {currentTarget.requiredGesture === 'palm' && '👋'}
-                  {currentTarget.requiredGesture === 'fist' && '✊'}
-                  {currentTarget.requiredGesture === 'pinch' && '🤏'}
-                  {currentTarget.requiredGesture === 'peace' && '✌️'}
-                  {currentTarget.requiredGesture === 'pointing' && '👆'}
-                  {currentTarget.requiredGesture === 'swipe_left' && '👈'}
-                  {currentTarget.requiredGesture === 'swipe_right' && '👉'}
-                </span>
-              </div>
+          <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest block">Combat Directives</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <div className="flex items-center gap-2.5 bg-zinc-900/40 p-2.5 rounded-xl border border-white/5">
+              <span className="text-xl">🍉</span>
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Perform Gesture:</span>
-                <span className="text-xl font-black text-white tracking-wide mt-0.5">
-                  {getGestureShortcut(currentTarget.requiredGesture)}
-                </span>
-                <span className="text-[10px] text-zinc-500 mt-0.5">
-                  Requires hitting the {currentTarget.label}
-                </span>
+                <span className="text-[10px] font-black uppercase text-emerald-400">Slice Fruits</span>
+                <span className="text-[9px] text-zinc-400">Hover hand to slash</span>
               </div>
             </div>
-          ) : (
-            <div className="flex items-center justify-center h-20 text-zinc-500 text-xs mt-2 italic">
-              Awaiting next target spawn...
+            <div className="flex items-center gap-2.5 bg-zinc-900/40 p-2.5 rounded-xl border border-white/5">
+              <span className="text-xl">💣</span>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase text-red-400">Avoid Bombs</span>
+                <span className="text-[9px] text-zinc-400">Detonates on contact</span>
+              </div>
             </div>
-          )}
+            <div className="flex items-center gap-2.5 bg-zinc-900/40 p-2.5 rounded-xl border border-white/5">
+              <span className="text-xl">🔻</span>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase text-amber-400">Keep Them Up</span>
+                <span className="text-[9px] text-zinc-400">Loses shield on drop</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Small Leaderboard / Streak status */}
-        <div className="pt-4 border-t border-white/5 flex items-center justify-between text-xs text-zinc-500">
+        <div className="pt-4 border-t border-white/5 flex items-center justify-between text-xs text-zinc-500 mt-4">
           <div className="flex items-center gap-1.5">
             <Award className="w-3.5 h-3.5 text-yellow-500" />
             <span>High Score: <strong className="text-zinc-300">{useGameStore.getState().highScore}</strong></span>
           </div>
-          <span>Active Targets: <strong className="text-zinc-300">{activeObjects.filter(o => !o.isHit && !o.isMissed).length}</strong></span>
+          <div className="flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5 text-blue-400" />
+            <span>Active Targets: <strong className="text-zinc-300">{activeObjects.filter(o => !o.isHit && !o.isMissed).length}</strong></span>
+          </div>
         </div>
       </div>
 
-      {/* 3. Bottom Panel: Mini-Gesture reference guide */}
-      <div className="px-5 py-4 rounded-2xl bg-white/5 border border-white/5 backdrop-blur-md">
-        <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block mb-3">Gesture Mapping Matrix</span>
-        
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          {[
-            { name: '👋 Palm', shape: 'Blue Orb', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-            { name: '✊ Fist', shape: 'Red Cube', color: 'bg-red-500/10 text-red-400 border-red-500/20' },
-            { name: '🤏 Pinch', shape: 'Yellow Dmd', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-            { name: '✌️ Peace', shape: 'Green Tri', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-            { name: '👆 Point', shape: 'Purple Star', color: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
-            { name: '👈 Swipe L', shape: 'Orange Wave', color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
-            { name: '👉 Swipe R', shape: 'Cyan Arrow', color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' }
-          ].map((item, idx) => (
-            <div key={idx} className={`p-2 rounded-xl border flex flex-col items-center text-center ${item.color}`}>
-              <span className="text-xs font-bold">{item.name}</span>
-              <span className="text-[9px] font-medium text-white/50 mt-0.5">{item.shape}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 4. Action bar (Reset, Settings, Return Home) */}
+      {/* 3. Action bar (Reset, Settings, Return Home) */}
       <div className="flex gap-3">
         <button
           onClick={resetGame}

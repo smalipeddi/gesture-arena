@@ -7,11 +7,32 @@ import WebcamFeed from './components/camera/WebcamFeed';
 import GameArea from './components/game/GameArea';
 import HUD from './components/game/HUD';
 import { Award, X } from 'lucide-react';
+import audioManager from './audio/audioManager';
 
 export const App: React.FC = () => {
   const activePage = useGameStore((state) => state.activePage);
   const recentAchievement = useGameStore((state) => state.recentUnlockedAchievement);
   const clearRecentAchievement = useGameStore((state) => state.clearRecentAchievement);
+
+  // Global Audio Autoplay Unlocker
+  useEffect(() => {
+    const unlockAudio = () => {
+      audioManager.resume();
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+
+    window.addEventListener('click', unlockAudio);
+    window.addEventListener('keydown', unlockAudio);
+    window.addEventListener('touchstart', unlockAudio);
+
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+  }, []);
 
   // Auto-dismiss achievement toasts after 3.5 seconds
   useEffect(() => {

@@ -27,12 +27,23 @@ interface FloatingText {
   fontSize: number;
 }
 
+interface SliceLine {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  alpha: number;
+  createdAt: number;
+}
+
 export const GameArea: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   
   // Game states from store
   const activeObjects = useGameStore((state) => state.activeObjects);
+  const slicedHalves = useGameStore((state) => state.slicedHalves);
   const handPosition = useGameStore((state) => state.handPosition);
   const detectedGesture = useGameStore((state) => state.detectedGesture);
   const gameState = useGameStore((state) => state.gameState);
@@ -53,7 +64,9 @@ export const GameArea: React.FC = () => {
   // Particles & Floating Scores (held in ref to keep loop 60fps with no react overhead)
   const particles = useRef<Particle[]>([]);
   const floatingTexts = useRef<FloatingText[]>([]);
+  const sliceLines = useRef<SliceLine[]>([]);
   const lastTime = useRef<number>(0);
+  const trail = useRef<{ x: number; y: number; time: number; color?: string }[]>([]);
   
   // Visual FX State
   const [screenShake, setScreenShake] = useState({ x: 0, y: 0 });
@@ -160,6 +173,29 @@ export const GameArea: React.FC = () => {
           const cx = (obj.x / 100) * w;
           const cy = (obj.y / 100) * h;
           spawnExplosion(cx, cy, obj.color);
+
+          // Add slice line representing cut direction
+          if (!obj.isBomb) {
+            let angle = 0;
+            if (trail.current.length > 1) {
+              const p1 = trail.current[trail.current.length - 2];
+              const p2 = trail.current[trail.current.length - 1];
+              angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            } else {
+              angle = Math.random() * Math.PI * 2;
+            }
+            const radius = (obj.radius / 100) * Math.min(w, h);
+            const len = radius * 1.6;
+            sliceLines.current.push({
+              id: Math.random().toString(),
+              x1: cx - Math.cos(angle) * len,
+              y1: cy - Math.sin(angle) * len,
+              x2: cx + Math.cos(angle) * len,
+              y2: cy + Math.sin(angle) * len,
+              alpha: 1.0,
+              createdAt: Date.now()
+            });
+          }
           
           // Calculate score added
           const diffMulti = difficulty === 'easy' ? 1 : difficulty === 'medium' ? 1.5 : difficulty === 'hard' ? 2 : difficulty === 'expert' ? 3 : 5;
@@ -247,7 +283,112 @@ export const GameArea: React.FC = () => {
         ctx.stroke();
       }
 
-      // Draw target objects
+  const getGestureColor = (gesture: string) => {
+    if (gesture && gesture !== 'none') {
+      return '#FFD700'; // Gold!
+    }
+    return '#06B6D4'; // default Cyan
+  };
+
+  // Record and update hand trail for slashing effect
+  if (handPosition && (gameState === 'playing' || gameState === 'countdown')) {
+    const hx = (handPosition.x / 100) * w;
+    const hy = (handPosition.y / 100) * h;
+    const color = getGestureColor(detectedGesture);
+    trail.current.push({ x: hx, y: hy, time: Date.now(), color });
+  }
+  // Keep trail points only for the last 180ms
+  trail.current = trail.current.filter((p) => Date.now() - p.time < 180);
+
+  // Draw Sword Trail
+  if (trail.current.length > 1 && (gameState === 'playing' || gameState === 'countdown')) {
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    for (let i = 1; i < trail.current.length; i++) {
+      const p1 = trail.current[i - 1];
+      const p2 = trail.current[i];
+      const age = Date.now() - p2.time;
+      const ratio = Math.max(0, 1 - age / 180);
+      
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      
+      ctx.save();
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = p2.color || '#06B6D4';
+      ctx.strokeStyle = p2.color || '#06B6D4';
+      ctx.lineWidth = 9 * ratio;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+      // Draw sliced halves
+      slicedHalves.forEach((half) => {
+        const cx = (half.x / 100) * w;
+        const cy = (half.y / 100) * h;
+        const radius = (half.type === 'watermelon' ? 9.5 : half.type === 'banana' ? 7.5 : 7.0) / 100 * Math.min(w, h);
+        
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(half.rotation);
+        ctx.globalAlpha = half.opacity;
+
+        // Glow aura matching fruit color
+        ctx.shadowBlur = 10 * half.opacity;
+        ctx.shadowColor = half.color;
+
+        const sideMultiplier = half.side === 'left' ? -1 : 1;
+        const startAngle = half.side === 'left' ? Math.PI / 2 : -Math.PI / 2;
+        const endAngle = half.side === 'left' ? (3 * Math.PI) / 2 : Math.PI / 2;
+
+        // Draw shell rind
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = half.color;
+        ctx.fill();
+
+        // Draw flesh inside
+        let fleshColor = '#FFFFFF';
+        if (half.type === 'watermelon') fleshColor = '#EF4444'; // pinkish red inside
+        else if (half.type === 'orange') fleshColor = '#FDBA74';
+        else if (half.type === 'apple') fleshColor = '#FEF08A';
+        else if (half.type === 'banana') fleshColor = '#FEF9C3';
+        else if (half.type === 'coconut') fleshColor = '#FEFEE2';
+
+        ctx.beginPath();
+        ctx.arc(0, 0, radius * 0.82, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = fleshColor;
+        ctx.fill();
+
+        // Details (seeds / segments)
+        if (half.type === 'watermelon') {
+          ctx.fillStyle = '#1E1E24';
+          ctx.beginPath();
+          ctx.arc(sideMultiplier * radius * 0.3, -radius * 0.2, radius * 0.08, 0, Math.PI * 2);
+          ctx.arc(sideMultiplier * radius * 0.4, radius * 0.25, radius * 0.08, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (half.type === 'orange') {
+          ctx.strokeStyle = 'rgba(249, 115, 22, 0.4)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(sideMultiplier * radius * 0.7, -radius * 0.35);
+          ctx.moveTo(0, 0);
+          ctx.lineTo(sideMultiplier * radius * 0.7, radius * 0.35);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      });
+
+      // Draw active fruits & bombs
       activeObjects.forEach((obj) => {
         if (obj.isHit || obj.isMissed) return;
 
@@ -256,141 +397,234 @@ export const GameArea: React.FC = () => {
         const radius = (obj.radius / 100) * Math.min(w, h) * obj.scale;
         
         ctx.save();
-
-        // 1. Draw glowing background aura
-        ctx.shadowBlur = 20 * obj.opacity;
+        ctx.shadowBlur = 15 * obj.opacity;
         ctx.shadowColor = obj.color;
 
-        ctx.fillStyle = obj.color;
-        ctx.strokeStyle = '#FFFFFF';
+        if (obj.isBomb) {
+          // Draw Bomb
+          ctx.fillStyle = '#1E1E24';
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius * 0.95, 0, Math.PI * 2);
+          ctx.fill();
 
-        // Shape Switch
-        switch (obj.type) {
-          case 'orb': // Circle
+          // Spikes
+          ctx.fillStyle = '#4B5563';
+          const spikes = 8;
+          for (let i = 0; i < spikes; i++) {
+            const angle = (i * Math.PI * 2) / spikes + obj.rotation;
+            const sx = cx + Math.cos(angle) * radius * 0.85;
+            const sy = cy + Math.sin(angle) * radius * 0.85;
+            const ex = cx + Math.cos(angle) * radius * 1.15;
+            const ey = cy + Math.sin(angle) * radius * 1.15;
             ctx.beginPath();
-            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-
-          case 'cube': // Rotated square
-            ctx.translate(cx, cy);
-            ctx.rotate(time * 0.0015); // spin cube
-            ctx.beginPath();
-            ctx.rect(-radius, -radius, radius * 2, radius * 2);
-            ctx.fill();
-            break;
-
-          case 'diamond': // Diamond
-            ctx.translate(cx, cy);
-            ctx.beginPath();
-            ctx.moveTo(0, -radius * 1.25);
-            ctx.lineTo(radius * 1.25, 0);
-            ctx.lineTo(0, radius * 1.25);
-            ctx.lineTo(-radius * 1.25, 0);
+            ctx.moveTo(sx - Math.sin(angle) * radius * 0.12, sy + Math.cos(angle) * radius * 0.12);
+            ctx.lineTo(ex, ey);
+            ctx.lineTo(sx + Math.sin(angle) * radius * 0.12, sy - Math.cos(angle) * radius * 0.12);
             ctx.closePath();
             ctx.fill();
-            break;
+          }
 
-          case 'triangle': // Triangle
-            ctx.translate(cx, cy);
+          // Fuse
+          ctx.strokeStyle = '#D97706';
+          ctx.lineWidth = radius * 0.1;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - radius * 0.8);
+          ctx.quadraticCurveTo(cx + radius * 0.4, cy - radius * 1.3, cx + radius * 0.5, cy - radius * 1.45);
+          ctx.stroke();
+
+          // Spark particle
+          const sparkX = cx + radius * 0.5;
+          const sparkY = cy - radius * 1.45;
+          const sparkR = radius * (0.15 + Math.random() * 0.25);
+          ctx.fillStyle = Math.random() > 0.5 ? '#EF4444' : '#F59E0B';
+          ctx.beginPath();
+          ctx.arc(sparkX, sparkY, sparkR, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Draw required gesture overlay badge above the fruit
+          let gestureEmoji = '';
+          if (obj.type === 'apple') gestureEmoji = '✊';
+          else if (obj.type === 'banana') gestureEmoji = '✌️';
+          else if (obj.type === 'watermelon') gestureEmoji = '👋';
+          else if (obj.type === 'coconut') gestureEmoji = '🤏';
+          else if (obj.type === 'orange') gestureEmoji = '👆';
+
+          if (gestureEmoji) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.lineWidth = 1.5;
+            
+            const bx = cx;
+            const by = cy - radius - 18;
             ctx.beginPath();
-            ctx.moveTo(0, -radius * 1.2);
-            ctx.lineTo(radius * 1.2, radius * 0.8);
-            ctx.lineTo(-radius * 1.2, radius * 0.8);
-            ctx.closePath();
+            ctx.arc(bx, by, 12, 0, Math.PI * 2);
             ctx.fill();
-            break;
+            ctx.stroke();
 
-          case 'star': // 5-point Star
-            ctx.translate(cx, cy);
-            ctx.rotate(time * 0.0005);
-            const spikes = 5;
-            const outerR = radius * 1.25;
-            const innerR = radius * 0.6;
-            let rot = (Math.PI / 2) * 3;
-            let sx = 0;
-            let sy = 0;
-            const step = Math.PI / spikes;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 12px Outfit, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(gestureEmoji, bx, by);
+            ctx.restore();
+          }
 
+          // Draw Fruit
+          ctx.translate(cx, cy);
+          ctx.rotate(obj.rotation);
+
+          if (obj.type === 'apple') {
+            ctx.fillStyle = '#EF4444';
             ctx.beginPath();
-            ctx.moveTo(0, -outerR);
-            for (let i = 0; i < spikes; i++) {
-              sx = Math.cos(rot) * outerR;
-              sy = Math.sin(rot) * outerR;
-              ctx.lineTo(sx, sy);
-              rot += step;
-
-              sx = Math.cos(rot) * innerR;
-              sy = Math.sin(rot) * innerR;
-              ctx.lineTo(sx, sy);
-              rot += step;
-            }
-            ctx.closePath();
+            ctx.arc(-radius * 0.15, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.arc(radius * 0.15, 0, radius * 0.95, 0, Math.PI * 2);
             ctx.fill();
-            break;
+            
+            // Specular radial gloss highlight
+            const gloss = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, -radius * 0.3, -radius * 0.3, radius * 0.7);
+            gloss.addColorStop(0, 'rgba(255, 255, 255, 0.65)');
+            gloss.addColorStop(0.3, 'rgba(255, 255, 255, 0.25)');
+            gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = gloss;
+            ctx.beginPath();
+            ctx.arc(-radius * 0.15, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.arc(radius * 0.15, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.fill();
 
-          case 'wave': // Wave
-            ctx.strokeStyle = obj.color;
-            ctx.lineWidth = 5 * obj.scale;
+            // Stem
+            ctx.strokeStyle = '#78350F';
+            ctx.lineWidth = radius * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(0, -radius * 0.7);
+            ctx.quadraticCurveTo(radius * 0.2, -radius * 1.25, radius * 0.3, -radius * 1.2);
+            ctx.stroke();
+
+            // Leaf
+            ctx.fillStyle = '#10B981';
+            ctx.beginPath();
+            ctx.ellipse(radius * 0.2, -radius * 1.0, radius * 0.35, radius * 0.18, Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (obj.type === 'banana') {
+            ctx.strokeStyle = '#F59E0B';
+            ctx.lineWidth = radius * 0.55;
             ctx.lineCap = 'round';
             ctx.beginPath();
-            ctx.moveTo(cx - radius * 1.2, cy);
-            ctx.quadraticCurveTo(cx - radius * 0.6, cy - radius, cx, cy);
-            ctx.quadraticCurveTo(cx + radius * 0.6, cy + radius, cx + radius * 1.2, cy);
+            ctx.arc(-radius * 0.3, -radius * 0.3, radius * 0.95, 0.15 * Math.PI, 0.65 * Math.PI);
             ctx.stroke();
-            break;
 
-          case 'arrow': // Arrow
-            ctx.translate(cx, cy);
+            // Specular curve highlight
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+            ctx.lineWidth = radius * 0.12;
             ctx.beginPath();
-            ctx.moveTo(-radius * 1.2, -radius * 0.6);
-            ctx.lineTo(radius * 0.4, 0);
-            ctx.lineTo(-radius * 1.2, radius * 0.6);
-            ctx.lineTo(-radius * 0.6, 0);
-            ctx.closePath();
+            ctx.arc(-radius * 0.32, -radius * 0.32, radius * 0.95, 0.22 * Math.PI, 0.48 * Math.PI);
+            ctx.stroke();
+
+            ctx.strokeStyle = '#3F6212';
+            ctx.lineWidth = radius * 0.35;
+            ctx.beginPath();
+            ctx.arc(-radius * 0.3, -radius * 0.3, radius * 0.95, 0.65 * Math.PI, 0.68 * Math.PI);
+            ctx.stroke();
+          } else if (obj.type === 'watermelon') {
+            ctx.fillStyle = '#065F46';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, radius * 1.15, radius * 0.85, 0, 0, Math.PI * 2);
             ctx.fill();
-            break;
+            
+            ctx.strokeStyle = '#10B981';
+            ctx.lineWidth = radius * 0.12;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, radius * 0.9, radius * 0.6, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Specular radial gloss highlight
+            const gloss = ctx.createRadialGradient(-radius * 0.4, -radius * 0.3, 0, -radius * 0.4, -radius * 0.3, radius * 0.8);
+            gloss.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+            gloss.addColorStop(0.4, 'rgba(255, 255, 255, 0.15)');
+            gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = gloss;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, radius * 1.15, radius * 0.85, 0, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (obj.type === 'orange') {
+            ctx.fillStyle = '#F97316';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Radial highlight
+            const gloss = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, -radius * 0.3, -radius * 0.3, radius * 0.7);
+            gloss.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+            gloss.addColorStop(0.4, 'rgba(255, 255, 255, 0.2)');
+            gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = gloss;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#C2410C';
+            for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+              const rx = Math.cos(a) * radius * 0.45;
+              const ry = Math.sin(a) * radius * 0.45;
+              ctx.beginPath();
+              ctx.arc(rx, ry, radius * 0.08, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          } else if (obj.type === 'coconut') {
+            ctx.fillStyle = '#78350F';
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Specular radial gloss highlight
+            const gloss = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, 0, -radius * 0.3, -radius * 0.3, radius * 0.7);
+            gloss.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
+            gloss.addColorStop(0.4, 'rgba(255, 255, 255, 0.15)');
+            gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = gloss;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#451A03';
+            ctx.lineWidth = radius * 0.08;
+            ctx.beginPath();
+            ctx.moveTo(-radius * 0.5, -radius * 0.2);
+            ctx.lineTo(-radius * 0.3, radius * 0.4);
+            ctx.moveTo(radius * 0.4, -radius * 0.4);
+            ctx.lineTo(radius * 0.2, radius * 0.3);
+            ctx.stroke();
+          }
         }
-
         ctx.restore();
+      });
 
-        // 2. Draw border outline
+      // Update and draw golden slice cut lines
+      sliceLines.current = sliceLines.current.filter((line) => {
+        const age = Date.now() - line.createdAt;
+        line.alpha = Math.max(0, 1 - age / 400); // fade out over 400ms
+
+        if (line.alpha <= 0) return false;
+
         ctx.save();
+        ctx.globalAlpha = line.alpha;
+        ctx.strokeStyle = '#FFE259';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#FFA751';
+        ctx.lineWidth = 4 * line.alpha;
+        ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.arc(cx, cy, radius + 2, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 1.5;
+        ctx.moveTo(line.x1, line.y1);
+        ctx.lineTo(line.x2, line.y2);
         ctx.stroke();
-        ctx.restore();
-
-        // 3. Draw shrinking timer circle
-        ctx.save();
-        const age = Date.now() - obj.createdAt;
-        const progress = Math.max(0, 1 - age / obj.duration);
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
-        ctx.strokeStyle = progress > 0.3 ? obj.color : '#EF4444'; // Red if running out of time
-        ctx.lineWidth = 3.5;
+        
+        // Inner white core
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.5 * line.alpha;
         ctx.stroke();
+        
         ctx.restore();
-
-        // 4. Draw text indicators (Emoji / Gesture guide label) inside target
-        ctx.save();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = `bold ${Math.max(10, radius * 0.45)}px Outfit, Inter, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        let shortcut = '';
-        if (obj.requiredGesture === 'palm') shortcut = '👋';
-        else if (obj.requiredGesture === 'fist') shortcut = '✊';
-        else if (obj.requiredGesture === 'pinch') shortcut = '🤏';
-        else if (obj.requiredGesture === 'peace') shortcut = '✌️';
-        else if (obj.requiredGesture === 'pointing') shortcut = '👆';
-        else if (obj.requiredGesture === 'swipe_left') shortcut = '👈';
-        else if (obj.requiredGesture === 'swipe_right') shortcut = '👉';
-
-        ctx.fillText(shortcut, cx, cy);
-        ctx.restore();
+        return true;
       });
 
       // Update and draw particles
@@ -434,42 +668,94 @@ export const GameArea: React.FC = () => {
       });
 
       // Draw hand cursor pointer if available
-      if (handPosition && gameState === 'playing') {
+      if (handPosition && (gameState === 'playing' || gameState === 'countdown')) {
         const hx = (handPosition.x / 100) * w;
         const hy = (handPosition.y / 100) * h;
+        const isUsingGesture = detectedGesture && detectedGesture !== 'none';
+        const color = getGestureColor(detectedGesture);
 
         ctx.save();
-        // Pulsing glow cursor
-        const scaleVal = 1 + Math.sin(time * 0.01) * 0.08;
-        ctx.translate(hx, hy);
-        ctx.scale(scaleVal, scaleVal);
 
-        // Check if hand is currently hovering over any required matching gesture object
-        let isHoveringCorrect = false;
-        for (const obj of activeObjects) {
-          if (obj.isHit || obj.isMissed) continue;
-          const dist = Math.hypot((obj.x / 100) * w - hx, (obj.y / 100) * h - hy);
-          // 10% hover range
-          if (dist < (obj.radius + 10) / 100 * Math.min(w, h)) {
-            isHoveringCorrect = obj.requiredGesture === detectedGesture;
-            break;
+        if (isUsingGesture) {
+          // Draw a stylized golden blade tip pointing along the direction of motion
+          let angle = 0;
+          if (trail.current.length > 1) {
+            const p1 = trail.current[trail.current.length - 2];
+            const p2 = trail.current[trail.current.length - 1];
+            angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
           }
+          
+          ctx.translate(hx, hy);
+          ctx.rotate(angle);
+
+          ctx.shadowBlur = 18;
+          ctx.shadowColor = '#FFD700';
+
+          // Outer sword blade shape
+          const grad = ctx.createLinearGradient(0, -6, 25, 6);
+          grad.addColorStop(0, '#FFE259');
+          grad.addColorStop(1, '#FFA751');
+          ctx.fillStyle = grad;
+
+          ctx.beginPath();
+          ctx.moveTo(0, -5);     // Base bottom
+          ctx.lineTo(15, -4);    // Middle bottom
+          ctx.lineTo(25, 0);     // Tip point
+          ctx.lineTo(15, 4);     // Middle top
+          ctx.lineTo(0, 5);      // Base top
+          ctx.closePath();
+          ctx.fill();
+
+          // Inner white glowing core line
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(20, 0);
+          ctx.stroke();
+
+          // Floating gesture emoji
+          let emoji = '';
+          if (detectedGesture === 'palm') emoji = '👋';
+          else if (detectedGesture === 'fist') emoji = '✊';
+          else if (detectedGesture === 'pinch') emoji = '🤏';
+          else if (detectedGesture === 'peace') emoji = '✌️';
+          else if (detectedGesture === 'pointing') emoji = '👆';
+          else if (detectedGesture === 'swipe_left') emoji = '👈';
+          else if (detectedGesture === 'swipe_right') emoji = '👉';
+
+          if (emoji) {
+            ctx.rotate(-angle); // unrotate for text drawing so text is upright
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 13px Outfit, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = '#FFD700';
+            ctx.fillText(emoji, 25, -12);
+          }
+        } else {
+          ctx.translate(hx, hy);
+          
+          // Pulse scale
+          const scaleVal = 1 + Math.sin(time * 0.01) * 0.08;
+          ctx.scale(scaleVal, scaleVal);
+
+          // Outer halo matching gesture color (cyan/blue)
+          ctx.beginPath();
+          ctx.arc(0, 0, 14, 0, Math.PI * 2);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Inner glowing core
+          ctx.beginPath();
+          ctx.arc(0, 0, 6, 0, Math.PI * 2);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = color;
+          ctx.fill();
         }
-
-        // Inner glowing core
-        ctx.beginPath();
-        ctx.arc(0, 0, 8, 0, Math.PI * 2);
-        ctx.fillStyle = isHoveringCorrect ? '#10B981' : '#FFFFFF';
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = isHoveringCorrect ? '#10B981' : '#3B82F6';
-        ctx.fill();
-
-        // Outer scanning ring
-        ctx.beginPath();
-        ctx.arc(0, 0, 18, 0, Math.PI * 2);
-        ctx.strokeStyle = isHoveringCorrect ? 'rgba(16, 185, 129, 0.6)' : 'rgba(59, 130, 246, 0.4)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
 
         ctx.restore();
       }
@@ -484,7 +770,7 @@ export const GameArea: React.FC = () => {
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [activeObjects, gameState, handPosition, tickGame, detectedGesture, screenShake, combo]);
+  }, [activeObjects, slicedHalves, gameState, handPosition, tickGame, detectedGesture, screenShake, combo]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full min-h-[300px] md:min-h-[400px] rounded-2xl bg-zinc-950/70 backdrop-blur-md border border-zinc-800/80 overflow-hidden">

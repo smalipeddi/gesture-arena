@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TargetObject, DifficultyLevel, GameSettings, Achievement, GestureType, TargetShape } from '../types';
+import type { TargetObject, DifficultyLevel, GameSettings, Achievement, GestureType, FruitType, SlicedHalf } from '../types';
 import audioManager from '../audio/audioManager';
 
 interface GameState {
@@ -22,6 +22,7 @@ interface GameState {
   detectedGesture: GestureType;
   gestureHoldTimer: number; // tracks how long a gesture is held
   handPosition: { x: number; y: number } | null;
+  lastHandPosition: { x: number; y: number } | null;
   trackingConfidence: number;
   fps: number;
   cameraActive: boolean;
@@ -30,6 +31,7 @@ interface GameState {
 
   // Active Objects
   activeObjects: TargetObject[];
+  slicedHalves: SlicedHalf[];
   
   // Settings
   settings: GameSettings;
@@ -61,7 +63,7 @@ interface GameState {
   // Game Loop Actions
   spawnObject: () => void;
   tickGame: (dt: number) => void;
-  processGestureInput: (gesture: GestureType, allowGlobalMatch?: boolean) => void;
+  checkSliceInput: (start: { x: number; y: number }, end: { x: number; y: number }) => void;
   unlockAchievement: (id: string) => void;
   
   // Feedback Actions
@@ -79,22 +81,14 @@ const defaultAchievements: Achievement[] = [
 ];
 
 const DIFFICULTY_STAGES: { [key in DifficultyLevel]: { spawnRate: number; duration: number; maxObjects: number; speed: number; multiplier: number } } = {
-  easy: { spawnRate: 3000, duration: 6000, maxObjects: 3, speed: 0.05, multiplier: 1 },
-  medium: { spawnRate: 2200, duration: 5000, maxObjects: 4, speed: 0.09, multiplier: 1.5 },
-  hard: { spawnRate: 1600, duration: 4000, maxObjects: 5, speed: 0.14, multiplier: 2 },
-  expert: { spawnRate: 1100, duration: 3000, maxObjects: 6, speed: 0.20, multiplier: 3 },
-  insane: { spawnRate: 800, duration: 2200, maxObjects: 8, speed: 0.28, multiplier: 5 }
+  easy: { spawnRate: 3000, duration: 6000, maxObjects: 3, speed: 0.03, multiplier: 1 },
+  medium: { spawnRate: 2200, duration: 5000, maxObjects: 4, speed: 0.05, multiplier: 1.5 },
+  hard: { spawnRate: 1600, duration: 4000, maxObjects: 5, speed: 0.08, multiplier: 2 },
+  expert: { spawnRate: 1100, duration: 3000, maxObjects: 6, speed: 0.11, multiplier: 3 },
+  insane: { spawnRate: 800, duration: 2200, maxObjects: 8, speed: 0.15, multiplier: 5 }
 };
 
-const OBJECT_TYPES: { type: TargetShape; gesture: GestureType; color: string; glow: string; label: string }[] = [
-  { type: 'orb', gesture: 'palm', color: '#3B82F6', glow: 'rgba(59, 130, 246, 0.4)', label: 'Open Palm' },
-  { type: 'cube', gesture: 'fist', color: '#EF4444', glow: 'rgba(239, 68, 68, 0.4)', label: 'Fist' },
-  { type: 'diamond', gesture: 'pinch', color: '#F59E0B', glow: 'rgba(245, 158, 11, 0.4)', label: 'Pinch' },
-  { type: 'triangle', gesture: 'peace', color: '#10B981', glow: 'rgba(16, 185, 129, 0.4)', label: 'Peace Sign' },
-  { type: 'star', gesture: 'pointing', color: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.4)', label: 'Pointing' },
-  { type: 'wave', gesture: 'swipe_left', color: '#F97316', glow: 'rgba(249, 115, 22, 0.4)', label: 'Swipe Left' },
-  { type: 'arrow', gesture: 'swipe_right', color: '#06B6D4', glow: 'rgba(6, 182, 212, 0.4)', label: 'Swipe Right' }
-];
+// OBJECT_TYPES removed since Fruit Ninja draws themed fruits
 
 export const useGameStore = create<GameState>((set, get) => {
   // Helper to load high score
@@ -140,12 +134,14 @@ export const useGameStore = create<GameState>((set, get) => {
     detectedGesture: 'none',
     gestureHoldTimer: 0,
     handPosition: null,
+    lastHandPosition: null,
     trackingConfidence: 0,
     fps: 0,
     cameraActive: false,
     cameraError: null,
     trackerReady: false,
     activeObjects: [],
+    slicedHalves: [],
     settings: initialSettings,
     achievements: initialAchievements,
     recentUnlockedAchievement: null,
@@ -218,22 +214,16 @@ export const useGameStore = create<GameState>((set, get) => {
     },
 
     setDetectedGesture: (gesture) => {
-      const prevGesture = get().detectedGesture;
       set({ detectedGesture: gesture });
-      
-      // If gesture changed, check input (allows global matching)
-      if (gesture !== 'none' && gesture !== prevGesture && get().gameState === 'playing') {
-        get().processGestureInput(gesture, true);
-      }
     },
 
     setHandPosition: (pos) => {
-      set({ handPosition: pos });
+      const lastPos = get().handPosition;
+      set({ lastHandPosition: lastPos, handPosition: pos });
       
-      // If hand is positioned, and we are holding a gesture, also check hover (hover-only matching)
-      const { detectedGesture, gameState } = get();
-      if (pos && gameState === 'playing' && detectedGesture !== 'none') {
-        get().processGestureInput(detectedGesture, false);
+      // If hand is positioned and we are playing, check slices
+      if (pos && lastPos && get().gameState === 'playing') {
+        get().checkSliceInput(lastPos, pos);
       }
     },
     setTrackingConfidence: (conf) => set({ trackingConfidence: conf }),
@@ -255,64 +245,56 @@ export const useGameStore = create<GameState>((set, get) => {
       const diffConfig = DIFFICULTY_STAGES[difficulty];
       if (activeObjects.length >= diffConfig.maxObjects) return;
 
-      // Randomly pick an object template
-      const template = OBJECT_TYPES[Math.floor(Math.random() * OBJECT_TYPES.length)];
+      // 1. Choose if it is a bomb
+      const isBomb = Math.random() < (difficulty === 'easy' ? 0.1 : difficulty === 'medium' ? 0.15 : difficulty === 'hard' ? 0.22 : 0.28);
       
-      // Spawn locations: spawn from borders
-      const border = Math.floor(Math.random() * 4); // 0: Top, 1: Right, 2: Bottom, 3: Left
-      let x = 50;
-      let y = 50;
-      let vx = (Math.random() - 0.5) * diffConfig.speed * 2;
-      let vy = (Math.random() - 0.5) * diffConfig.speed * 2;
-
-      const padding = 15;
-      if (border === 0) {
-        // Top
-        x = padding + Math.random() * (100 - 2 * padding);
-        y = 5;
-        vy = Math.abs(vy); // move down
-      } else if (border === 1) {
-        // Right
-        x = 95;
-        y = padding + Math.random() * (100 - 2 * padding);
-        vx = -Math.abs(vx); // move left
-      } else if (border === 2) {
-        // Bottom
-        x = padding + Math.random() * (100 - 2 * padding);
-        y = 95;
-        vy = -Math.abs(vy); // move up
+      // 2. Select Fruit/Bomb type
+      let template;
+      if (isBomb) {
+        template = { type: 'bomb', color: '#1E1E24', glow: 'rgba(239, 68, 68, 0.4)' };
       } else {
-        // Left
-        x = 5;
-        y = padding + Math.random() * (100 - 2 * padding);
-        vx = Math.abs(vx); // move right
+        const fruits = [
+          { type: 'apple', color: '#EF4444', glow: 'rgba(239, 68, 68, 0.4)' },
+          { type: 'banana', color: '#F59E0B', glow: 'rgba(245, 158, 11, 0.4)' },
+          { type: 'watermelon', color: '#10B981', glow: 'rgba(16, 185, 129, 0.4)' },
+          { type: 'coconut', color: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.4)' },
+          { type: 'orange', color: '#F97316', glow: 'rgba(249, 115, 22, 0.4)' }
+        ];
+        template = fruits[Math.floor(Math.random() * fruits.length)];
       }
 
-      // Special movement behavior for higher difficulties
-      if (difficulty === 'expert' || difficulty === 'insane') {
-        // give it a bit higher speed or slight curves
-        vx *= 1.3;
-        vy *= 1.3;
-      }
+      // 3. Spawning from the bottom area
+      const x = 15 + Math.random() * 70; // 15% to 85% width
+      const y = 100; // bottom of canvas
+      
+      // Upward velocity (parabolic toss) - scaled down for slower motion
+      const baseUpwardSpeed = diffConfig.speed * 75;
+      const vy = - (baseUpwardSpeed + Math.random() * 1.5);
+      
+      // Sideways velocity to create an arc - scaled down
+      const targetCenterDir = x < 50 ? 1 : -1;
+      const vx = targetCenterDir * (0.3 + Math.random() * 0.9);
 
       const newObj: TargetObject = {
         id: Math.random().toString(36).substring(2, 9),
-        type: template.type,
-        requiredGesture: template.gesture,
+        type: template.type as any,
         x,
         y,
         vx,
         vy,
-        radius: 8 + Math.random() * 4, // size 8 to 12
+        // Substantially larger radii (Apple/Orange/Coconut = 11.0, Watermelon = 14.0)
+        radius: template.type === 'watermelon' ? 14.0 : template.type === 'banana' ? 12.0 : 11.0,
         color: template.color,
         glowColor: template.glow,
-        label: template.label,
         createdAt: Date.now(),
-        duration: diffConfig.duration,
+        duration: 4500,
         opacity: 0,
         isHit: false,
         isMissed: false,
-        scale: 0.1 // animation scale up on entry
+        scale: 0.1,
+        isBomb,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.05
       };
 
       set((state) => ({
@@ -321,14 +303,14 @@ export const useGameStore = create<GameState>((set, get) => {
     },
 
     tickGame: (dt) => {
-      const { gameState, activeObjects, difficulty, difficultyTimer, timeElapsed } = get();
+      const { gameState, activeObjects, slicedHalves, difficulty, difficultyTimer, timeElapsed } = get();
       if (gameState !== 'playing') return;
 
       const now = Date.now();
       const nextTimeElapsed = timeElapsed + dt;
       const nextDifficultyTimer = difficultyTimer + dt;
 
-      // Handle difficulty scaling (every 30 seconds = 30000ms)
+      // Handle difficulty scaling (every 30 seconds)
       let nextDifficulty = difficulty;
       if (nextDifficultyTimer >= 30000) {
         const difficulties: DifficultyLevel[] = ['easy', 'medium', 'hard', 'expert', 'insane'];
@@ -343,62 +325,83 @@ export const useGameStore = create<GameState>((set, get) => {
         }
       }
 
-      // Update positions and durations of active targets
+      const diffConfig = DIFFICULTY_STAGES[nextDifficulty];
+      const gravity = 0.08; // Gravity constant in normalized coordinates
+
+      // Update positions of active targets
       const updatedObjects: TargetObject[] = [];
       let livesDeducted = 0;
+      let missedFruit = false;
 
       activeObjects.forEach((obj) => {
-        // Calculate age
-        const age = now - obj.createdAt;
+        if (obj.isHit) {
+          // If already sliced, remove from active list
+          return;
+        }
+
+        // Apply Gravity
+        obj.vy += gravity * (dt / 16.67);
         
-        if (age >= obj.duration) {
+        // Update Position
+        obj.x += obj.vx * (dt / 16.67);
+        obj.y += obj.vy * (dt / 16.67);
+
+        // Spin
+        obj.rotation += obj.rotationSpeed * (dt / 16.67);
+
+        // Fade in and scale up on spawn
+        if (obj.opacity < 1) obj.opacity = Math.min(1, obj.opacity + 0.1);
+        if (obj.scale < 1) obj.scale = Math.min(1, obj.scale + 0.15);
+
+        // Check if fell below the bottom of the screen
+        if (obj.y > 105 && obj.vy > 0) {
           // Missed object!
-          if (!obj.isHit && !obj.isMissed) {
+          if (!obj.isBomb) {
             livesDeducted++;
-            obj.isMissed = true;
+            missedFruit = true;
           }
+          obj.isMissed = true;
         } else {
-          // Physics update
-          obj.x += obj.vx * (dt / 16.67); // normalize to 60fps frame time
-          obj.y += obj.vy * (dt / 16.67);
-
-          // Fade in and scale up
-          if (obj.opacity < 1) obj.opacity = Math.min(1, obj.opacity + 0.1);
-          if (obj.scale < 1) obj.scale = Math.min(1, obj.scale + 0.15);
-
-          // Bounce off boundaries
-          const r = obj.radius / 2;
-          if (obj.x - r < 0 || obj.x + r > 100) {
-            obj.vx = -obj.vx;
-            obj.x = Math.max(r, Math.min(100 - r, obj.x));
-          }
-          if (obj.y - r < 0 || obj.y + r > 100) {
-            obj.vy = -obj.vy;
-            obj.y = Math.max(r, Math.min(100 - r, obj.y));
-          }
-
           updatedObjects.push(obj);
+        }
+      });
+
+      // Update positions of sliced halves
+      const updatedHalves: SlicedHalf[] = [];
+      slicedHalves.forEach((half) => {
+        // Apply Gravity
+        half.vy += gravity * (dt / 16.67);
+        
+        // Update Position
+        half.x += half.vx * (dt / 16.67);
+        half.y += half.vy * (dt / 16.67);
+
+        // Spin
+        half.rotation += half.rotationSpeed * (dt / 16.67);
+
+        // Slow fade out
+        half.opacity = Math.max(0, half.opacity - 0.02 * (dt / 16.67));
+
+        if (half.y < 110 && half.opacity > 0) {
+          updatedHalves.push(half);
         }
       });
 
       // Handle lives deductions
       let nextLives = get().lives - livesDeducted;
-      if (livesDeducted > 0) {
+      if (missedFruit) {
         audioManager.playFailure();
         set({ combo: 0 }); // reset combo on miss
       }
 
       if (nextLives <= 0) {
         nextLives = 0;
-        set({ lives: 0, activeObjects: updatedObjects });
+        set({ lives: 0, activeObjects: updatedObjects, slicedHalves: updatedHalves });
         get().endGame();
         return;
       }
 
       // Check if we should spawn a new object
-      const diffConfig = DIFFICULTY_STAGES[nextDifficulty];
-      
-      // Auto spawn check based on rate
       const lastSpawned = activeObjects.length > 0 
         ? Math.max(...activeObjects.map(o => o.createdAt))
         : 0;
@@ -410,7 +413,8 @@ export const useGameStore = create<GameState>((set, get) => {
         difficulty: nextDifficulty,
         difficultyTimer: nextDifficultyTimer >= 30000 ? 0 : nextDifficultyTimer,
         timeElapsed: nextTimeElapsed,
-        activeObjects: updatedObjects
+        activeObjects: updatedObjects,
+        slicedHalves: updatedHalves
       });
 
       if (shouldSpawn) {
@@ -418,88 +422,139 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
-    processGestureInput: (gesture, allowGlobalMatch = true) => {
-      const { gameState, activeObjects, difficulty, combo, score, handPosition } = get();
-      if (gameState !== 'playing' || gesture === 'none') return;
+    checkSliceInput: (start, end) => {
+      const { activeObjects, difficulty, combo, score, gameState, detectedGesture } = get();
+      if (gameState !== 'playing') return;
 
       const diffConfig = DIFFICULTY_STAGES[difficulty];
+      
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const swipeDistance = Math.hypot(dx, dy);
 
-      // Find if this gesture matches any active object on screen.
-      // To make it skill-based, we prioritize:
-      // 1. If handPosition is available, we check if hand cursor is overlapping/hovering an object requiring this gesture.
-      // 2. If no hover, and allowGlobalMatch is true, we match the OLDEST active object that matches this gesture (global hit).
-      // Let's implement both but give priority to objects closer to the hand cursor if hand is active.
+      // Play a swoosh sound if the swipe is fast enough
+      if (swipeDistance > 2.5) {
+        audioManager.playSlash();
+      }
 
-      let targetObj: TargetObject | null = null;
-      let matchedIndex = -1;
+      let hitOccurred = false;
+      const updatedObjects = [...activeObjects];
+      const newHalves: SlicedHalf[] = [];
+      let nextCombo = combo;
+      let nextScore = score;
+      let bombHit = false;
 
-      if (handPosition) {
-        // Find if we are hovering over an object that requires this gesture
-        for (let i = 0; i < activeObjects.length; i++) {
-          const obj = activeObjects[i];
-          if (obj.isHit || obj.isMissed) continue;
-          
-          // distance in normalized canvas percentage
-          const dist = Math.hypot(obj.x - handPosition.x, obj.y - handPosition.y);
-          // hover range: object radius + padding (e.g. 10% of screen width)
-          if (dist < obj.radius + 10 && obj.requiredGesture === gesture) {
-            targetObj = obj;
-            matchedIndex = i;
+      // Distance helper for line segment intersection with circle
+      const distToSegment = (px: number, py: number, x1: number, y1: number, x2: number, y2: number) => {
+        const l2 = Math.hypot(x2 - x1, y2 - y1);
+        if (l2 === 0) return Math.hypot(px - x1, py - y1);
+        let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / (l2 * l2);
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+      };
+
+      for (let i = 0; i < updatedObjects.length; i++) {
+        const obj = updatedObjects[i];
+        if (obj.isHit || obj.isMissed) continue;
+
+        // Check intersection
+        const dist = distToSegment(obj.x, obj.y, start.x, start.y, end.x, end.y);
+        
+        if (dist < obj.radius + 2.0) {
+          if (obj.isBomb) {
+            hitOccurred = true;
+            bombHit = true;
+            obj.isHit = true;
             break;
+          }
+
+          // Gesture matching criteria
+          let requiredGesture = 'none';
+          if (obj.type === 'apple') requiredGesture = 'fist';
+          else if (obj.type === 'banana') requiredGesture = 'peace';
+          else if (obj.type === 'watermelon') requiredGesture = 'palm';
+          else if (obj.type === 'coconut') requiredGesture = 'pinch';
+          else if (obj.type === 'orange') requiredGesture = 'pointing';
+
+          if (detectedGesture === requiredGesture) {
+            hitOccurred = true;
+            obj.isHit = true;
+            nextCombo += 1;
+            
+            const comboMultiplier = 1 + Math.floor(nextCombo / 3) * 0.3; // +30% every 3 combo
+            const pointsGained = Math.round(10 * diffConfig.multiplier * comboMultiplier);
+            nextScore += pointsGained;
+
+            // Spawn split halves flying apart
+            const angle = Math.atan2(dy, dx) + Math.PI / 2;
+            const halfSpeed = 1.8 + Math.random() * 1.0;
+            const hx = Math.cos(angle) * halfSpeed;
+            const hy = Math.sin(angle) * halfSpeed;
+
+            const baseHalf = {
+              type: obj.type as any,
+              x: obj.x,
+              y: obj.y,
+              opacity: 1.0,
+              color: obj.color,
+              createdAt: Date.now()
+            };
+
+            newHalves.push(
+              {
+                ...baseHalf,
+                id: Math.random().toString(),
+                vx: obj.vx - hx,
+                vy: obj.vy - Math.abs(hy) - 1.0,
+                rotation: Math.random() * Math.PI,
+                rotationSpeed: -0.15 - Math.random() * 0.15,
+                side: 'left'
+              },
+              {
+                ...baseHalf,
+                id: Math.random().toString(),
+                vx: obj.vx + hx,
+                vy: obj.vy - Math.abs(hy) - 1.0,
+                rotation: Math.random() * Math.PI + Math.PI,
+                rotationSpeed: 0.15 + Math.random() * 0.15,
+                side: 'right'
+              }
+            );
+          } else {
+            // Deflection pop sound if swiped with wrong gesture
+            audioManager.playClick();
           }
         }
       }
 
-      // If no hovered match found, look for the oldest matching object globally
-      if (matchedIndex === -1 && allowGlobalMatch) {
-        for (let i = 0; i < activeObjects.length; i++) {
-          const obj = activeObjects[i];
-          if (!obj.isHit && !obj.isMissed && obj.requiredGesture === gesture) {
-            targetObj = obj;
-            matchedIndex = i;
-            break;
-          }
-        }
-      }
-
-      if (targetObj && matchedIndex !== -1) {
-        // CORRECT GESTURE HIT!
-        audioManager.playSuccess();
-        
-        const nextCombo = combo + 1;
-        const nextMaxCombo = Math.max(get().maxCombo, nextCombo);
-        
-        // Dynamic scoring: +10 base * difficulty multiplier * combo multiplier
-        const comboMultiplier = 1 + Math.floor(nextCombo / 5) * 0.5; // +50% every 5 combo
-        const pointsGained = Math.round(10 * diffConfig.multiplier * comboMultiplier);
-        const nextScore = score + pointsGained;
-
-        // Mark object as hit
-        const updatedObjects = [...activeObjects];
-        updatedObjects[matchedIndex] = {
-          ...targetObj,
-          isHit: true
-        };
-
+      if (bombHit) {
+        audioManager.playExplosion();
+        let nextLives = get().lives - 1;
         set({
-          score: nextScore,
-          combo: nextCombo,
-          maxCombo: nextMaxCombo,
-          activeObjects: updatedObjects
+          combo: 0,
+          lives: Math.max(0, nextLives)
         });
 
-        // Trigger combo chime on milestones (every 5 combo)
-        if (nextCombo > 0 && nextCombo % 5 === 0) {
-          audioManager.playCombo();
+        if (nextLives <= 0) {
+          get().endGame();
         }
-
-        // Check Achievements
+      } else if (hitOccurred) {
+        audioManager.playSplat();
+        
         get().unlockAchievement('first_hit');
         if (nextCombo >= 10) get().unlockAchievement('combo_10');
         if (nextCombo >= 25) get().unlockAchievement('combo_25');
         if (nextScore >= 500) get().unlockAchievement('score_500');
         if (nextScore >= 1000) get().unlockAchievement('score_1000');
         if (nextCombo >= 50) get().unlockAchievement('perfect_50');
+
+        set((state) => ({
+          score: nextScore,
+          combo: nextCombo,
+          maxCombo: Math.max(state.maxCombo, nextCombo),
+          activeObjects: updatedObjects,
+          slicedHalves: [...state.slicedHalves, ...newHalves]
+        }));
       }
     },
 
